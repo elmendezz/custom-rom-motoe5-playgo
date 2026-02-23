@@ -10,37 +10,40 @@ jobs:
       - name: Checkout de tu repositorio
         uses: actions/checkout@v4
 
-      - name: Instalar Herramientas y Generador
+      - name: Instalar Herramientas
         run: |
           sudo apt-get update
-          sudo apt-get install -y python3-pip python3-setuptools p7zip-full android-sdk-libsparse-utils
-          
-          # Instalamos las librerías directamente desde PyPI
-          pip3 install gdown aospdtgen
+          sudo apt-get install -y python3-pip python3-setuptools p7zip-full android-sdk-libsparse-utils wget curl
+          pip3 install aospdtgen
 
-      - name: Descargar Firmware Stock (Google Drive)
+      - name: Descargar Firmware (Bypass Google Drive)
         run: |
-          # gdown descarga el zip del firmware
-          gdown --id 1xoiMh-8BRMOj68VWunxtLPRg6rI4lpmM -O firmware.zip
+          # Script para saltar el aviso de virus y cuota básica de Drive
+          CONFIRM=$(curl -sc /tmp/cookies.txt "https://drive.google.com/uc?export=download&id=1xoiMh-8BRMOj68VWunxtLPRg6rI4lpmM" | grep -TQ "confirm=" | sed 's/.*confirm=\([^&]*\).*/\1/')
+          curl -Lb /tmp/cookies.txt "https://drive.google.com/uc?export=download&confirm=$CONFIRM&id=1xoiMh-8BRMOj68VWunxtLPRg6rI4lpmM" -o firmware.zip
+
+      - name: Verificar y Extraer
+        run: |
+          if [ ! -f firmware.zip ] || [ $(stat -c%s firmware.zip) -lt 10000 ]; then
+            echo "Error: Google Drive bloqueó la descarga por cuota. Intenta subir el archivo a otro servidor o usa un link de AndroidHost."
+            exit 1
+          fi
           mkdir -p stock_raw
           unzip firmware.zip -d stock_raw/
 
-      - name: Unir Particiones Motorola (Sparsechunks)
+      - name: Unir Particiones Motorola
         run: |
           mkdir -p dump
-          # Unimos los pedazos de system y vendor que vienen en el zip de Moto
           simg2img stock_raw/system.img* dump/system.img || cp stock_raw/system.img dump/system.img || true
           simg2img stock_raw/vendor.img* dump/vendor.img || cp stock_raw/vendor.img dump/vendor.img || true
           cp stock_raw/boot.img dump/boot.img || true
 
       - name: Crear Device Tree
         run: |
-          # Creamos el directorio solicitado en el root
           mkdir -p DeviceTree
-          # El comando del paquete oficial es 'aospdtgen'
           aospdtgen dump/ -o DeviceTree/
 
-      - name: Subir el Device Tree como Artefacto
+      - name: Subir el Device Tree
         uses: actions/upload-artifact@v4
         with:
           name: Moto-E5-Play-Pettyl-Tree
