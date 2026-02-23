@@ -1,0 +1,72 @@
+name: AOSP 12 ARM32 MicroG Modder
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Liberar Espacio en GitHub Actions (Opcional pero recomendado)
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
+          sudo apt-get clean
+
+      - name: Instalar Herramientas de Edición de Imágenes
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wget e2fsprogs simg2img img2simg
+
+      - name: Descargar GSI Base (AOSP/Lineage ARM32)
+        run: |
+          # Aquí pondríamos el link de una GSI ARM de 32 bits pura (ej. AndyCGYan o Phhusson)
+          # Por ejemplo, descargamos una imagen descompilada:
+          # wget -O system.img "LINK_DE_LA_GSI_BASE"
+          echo "Descargando imagen..."
+          
+      - name: Montar la Imagen del Sistema
+        run: |
+          mkdir -p system_mount
+          # Agrandamos un poco la imagen por si MicroG ocupa espacio extra
+          e2fsck -f -y system.img || true
+          resize2fs system.img 3G
+          
+          # La montamos con permisos de lectura y escritura
+          sudo mount -o rw,loop system.img system_mount
+
+      - name: Debloat (Limpieza Extrema)
+        run: |
+          echo "Eliminando basura y overlays..."
+          sudo rm -rf system_mount/system/app/LiveWallpapersPicker
+          sudo rm -rf system_mount/system/app/HTMLViewer
+          sudo rm -rf system_mount/system/priv-app/ManagedProvisioning
+          # ¡Aquí podemos agregar toda la lista de cosas que quieras borrar!
+
+      - name: Inyectar MicroG y Aurora Store
+        run: |
+          echo "Descargando MicroG..."
+          sudo mkdir -p system_mount/system/priv-app/GmsCore
+          sudo wget -O system_mount/system/priv-app/GmsCore/GmsCore.apk "LINK_DIRECTO_MICROG_APK"
+          
+          echo "Descargando Aurora Store..."
+          sudo mkdir -p system_mount/system/priv-app/AuroraStore
+          sudo wget -O system_mount/system/priv-app/AuroraStore/AuroraStore.apk "LINK_DIRECTO_AURORA_APK"
+          
+          # Damos los permisos correctos
+          sudo chmod 644 system_mount/system/priv-app/GmsCore/GmsCore.apk
+          sudo chmod 644 system_mount/system/priv-app/AuroraStore/AuroraStore.apk
+
+      - name: Desmontar y Empaquetar
+        run: |
+          echo "Guardando cambios..."
+          sudo umount system_mount
+          
+          echo "Comprimiendo la nueva ROM..."
+          # Comprimimos en .xz para que la descarga sea rápida
+          xz -9 -T0 system.img
+
+      - name: Subir la ROM Personalizada
+        uses: actions/upload-artifact@v4
+        with:
+          name: Mi-AOSP12-MicroG-ARM32
+          path: system.img.xz
