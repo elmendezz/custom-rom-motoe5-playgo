@@ -4,59 +4,65 @@ on:
   workflow_dispatch:
     inputs:
       firmware_link:
-        description: 'Pega aquí el link directo de GoFile (o cualquier link directo)'
+        description: 'Link directo de GoFile o similar'
         required: true
-        default: ''
 
 jobs:
   generate:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout del repositorio
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Instalar Dependencias
+      - name: Instalar Herramientas
         run: |
           sudo apt-get update
           sudo apt-get install -y python3-pip p7zip-full android-sdk-libsparse-utils wget curl
           pip3 install aospdtgen
 
-      - name: Descargar Firmware Stock
+      - name: Descargar y Extraer
         run: |
-          # Usamos el link que pegaste en el input
-          # -L es para seguir redirecciones si GoFile las tiene
           wget -L -O stock.zip "${{ github.event.inputs.firmware_link }}"
-
-      - name: Extraer Firmware
-        run: |
           mkdir -p stock_raw
-          # Intentamos con unzip, si falla probamos con 7z
-          unzip stock.zip -d stock_raw/ || 7z x stock.zip -ostock_raw/
+          7z x stock.zip -ostock_raw/
 
-      - name: Unir Particiones Motorola (Sparsechunks)
+      - name: Unir Particiones (Fix Motorola Sparsechunks)
         run: |
           mkdir -p dump
-          # Unimos los pedazos. Motorola suele usar system.img.0, .1 o system.img_sparsechunk.0
-          # simg2img reconstruye la imagen completa para que el generador pueda leer el build.prop
-          if ls stock_raw/system.img* 1> /dev/null 2>&1; then
-            simg2img stock_raw/system.img* dump/system.img || cp stock_raw/system.img dump/system.img
-          fi
           
-          if ls stock_raw/vendor.img* 1> /dev/null 2>&1; then
-            simg2img stock_raw/vendor.img* dump/vendor.img || cp stock_raw/vendor.img dump/vendor.img
+          # Función para unir pedazos de Motorola
+          # Buscamos archivos tipo system.img_sparsechunk.0, system.img.0, etc.
+          echo "Procesando SYSTEM..."
+          SYSTEM_FILES=$(ls stock_raw/system*img* | sort -V)
+          if [ -n "$SYSTEM_FILES" ]; then
+            simg2img $SYSTEM_FILES dump/system.img || cp stock_raw/system.img dump/system.img || echo "No se pudo procesar system"
           fi
-          
-          # El boot.img es sagrado para sacar el kernel y el dtb
+
+          echo "Procesando VENDOR..."
+          VENDOR_FILES=$(ls stock_raw/vendor*img* | sort -V)
+          if [ -n "$VENDOR_FILES" ]; then
+            simg2img $VENDOR_FILES dump/vendor.img || cp stock_raw/vendor.img dump/vendor.img || echo "No se pudo procesar vendor"
+          fi
+
+          # Copiamos el boot.img (indispensable)
           cp stock_raw/boot.img dump/boot.img || echo "Boot.img no encontrado"
+          
+          # Listamos lo que quedó para debuggear si falla
+          ls -lh dump/
 
       - name: Crear Device Tree
         run: |
-          # Creamos el directorio solicitado en el root
+          # Si el dump no tiene system.img, el generador fallará. 
+          # Verificamos si existe antes de correrlo.
+          if [ ! -f dump/system.img ]; then
+            echo "ERROR: No se encontró dump/system.img. Revisa los nombres de los archivos en el zip."
+            exit 1
+          fi
+          
           mkdir -p DeviceTree
-          # Ejecutamos el generador sobre las imágenes unidas
           aospdtgen dump/ -o DeviceTree/
 
-      - name: Subir el Device Tree como Artefacto
+      - name: Subir el Device Tree
         uses: actions/upload-artifact@v4
         with:
           name: Moto-E5-Play-Pettyl-Tree
