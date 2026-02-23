@@ -26,28 +26,31 @@ jobs:
           mkdir -p stock_raw
           7z x stock.zip -ostock_raw/
 
-      - name: Reconstrucción Exacta de Imágenes
+      - name: Fusión Física de Motorola (El Truco Definitivo)
         run: |
-          mkdir -p dump/system dump/vendor
+          mkdir -p dump temp_mount
           
           echo ">>> Uniendo SYSTEM..."
-          # Usamos mapfile para leer los archivos ordenados correctamente y evitar problemas de espacios
-          mapfile -t SYS_CHUNKS < <(find stock_raw -type f -iname "*system*sparsechunk*" | sort -V)
-          if [ ${#SYS_CHUNKS[@]} -gt 0 ]; then
-            echo "Encontrados ${#SYS_CHUNKS[@]} fragmentos de System. Uniendo..."
-            simg2img "${SYS_CHUNKS[@]}" dump/system.img
+          # 1. Encontramos los fragmentos y los ordenamos numéricamente
+          SYS_CHUNKS=$(find stock_raw -type f -iname "*system.img_sparsechunk*" | sort -V)
+          if [ -n "$SYS_CHUNKS" ]; then
+            echo "Fusionando fragmentos en un solo archivo sparse..."
+            # 2. Los unimos a la fuerza en un solo archivo temporal
+            cat $SYS_CHUNKS > sys_temp.img
+            # 3. Ahora sí, simg2img lo convierte perfectamente
+            simg2img sys_temp.img dump/system.img || mv sys_temp.img dump/system.img
           else
-            SYS_IMG=$(find stock_raw -type f -name "system.img" | head -n 1)
+            SYS_IMG=$(find stock_raw -type f -iname "system.img" | head -n 1)
             [ -n "$SYS_IMG" ] && cp "$SYS_IMG" dump/system.img
           fi
 
           echo ">>> Uniendo VENDOR..."
-          mapfile -t VEN_CHUNKS < <(find stock_raw -type f -iname "*vendor*sparsechunk*" | sort -V)
-          if [ ${#VEN_CHUNKS[@]} -gt 0 ]; then
-            echo "Encontrados ${#VEN_CHUNKS[@]} fragmentos de Vendor. Uniendo..."
-            simg2img "${VEN_CHUNKS[@]}" dump/vendor.img
+          VEN_CHUNKS=$(find stock_raw -type f -iname "*vendor.img_sparsechunk*" | sort -V)
+          if [ -n "$VEN_CHUNKS" ]; then
+            cat $VEN_CHUNKS > ven_temp.img
+            simg2img ven_temp.img dump/vendor.img || mv ven_temp.img dump/vendor.img
           else
-            VEN_IMG=$(find stock_raw -type f -name "vendor.img" | head -n 1)
+            VEN_IMG=$(find stock_raw -type f -iname "vendor.img" | head -n 1)
             [ -n "$VEN_IMG" ] && cp "$VEN_IMG" dump/vendor.img
           fi
 
@@ -55,34 +58,36 @@ jobs:
           BOOT_IMG=$(find stock_raw -type f -name "boot.img" | head -n 1)
           [ -n "$BOOT_IMG" ] && cp "$BOOT_IMG" dump/boot.img
 
-      - name: Extracción con 7-Zip (Bypass de Mount)
+      - name: Verificar y Extraer (Mount)
         run: |
-          # Inspeccionamos qué tipo de imagen resultó (solo para debug en los logs)
-          echo "Analizando system.img..."
-          file dump/system.img || true
+          # Esto nos dirá en el log si la imagen es válida (debe decir "ext4 filesystem")
+          echo "Analizando tipo de archivo..."
+          file dump/system.img
           
           if [ -f dump/system.img ]; then
-            echo "Extrayendo System con 7z a la fuerza..."
-            # 7z abre el .img y extrae todo a la carpeta dump/system/
-            7z x dump/system.img -y -odump/system/ > /dev/null
-            
-            # Borramos la imagen original para que el generador solo vea la carpeta
-            rm dump/system.img
-          else
-            echo "ERROR: dump/system.img no existe."
-            exit 1
+            echo "Montando y extrayendo System (Ahora sí funcionará)..."
+            mkdir -p dump/system
+            sudo mount -o ro,loop dump/system.img temp_mount
+            sudo cp -a temp_mount/* dump/system/
+            sudo umount temp_mount
+            rm dump/system.img # Borramos para ahorrar espacio
           fi
 
           if [ -f dump/vendor.img ]; then
-            echo "Extrayendo Vendor con 7z a la fuerza..."
-            7z x dump/vendor.img -y -odump/vendor/ > /dev/null
+            echo "Montando y extrayendo Vendor..."
+            mkdir -p dump/vendor
+            sudo mount -o ro,loop dump/vendor.img temp_mount
+            sudo cp -a temp_mount/* dump/vendor/
+            sudo umount temp_mount
             rm dump/vendor.img
           fi
+          
+          # Restauramos los permisos para que el generador pueda leer la carpeta
+          sudo chown -R $USER:$USER dump/
 
       - name: Crear Device Tree
         run: |
           mkdir -p DeviceTree
-          # Ejecutamos el generador. Ahora leerá los archivos extraídos sin chistar.
           aospdtgen dump/ -o DeviceTree/
 
       - name: Subir el Device Tree
