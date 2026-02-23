@@ -17,7 +17,7 @@ jobs:
       - name: Instalar Herramientas
         run: |
           sudo apt-get update
-          sudo apt-get install -y python3-pip p7zip-full android-sdk-libsparse-utils curl
+          sudo apt-get install -y python3-pip p7zip-full android-sdk-libsparse-utils curl file
           pip3 install aospdtgen
 
       - name: Descargar y Extraer ZIP
@@ -26,67 +26,63 @@ jobs:
           mkdir -p stock_raw
           7z x stock.zip -ostock_raw/
 
-      - name: Búsqueda Profunda y Reconstrucción
+      - name: Reconstrucción Exacta de Imágenes
         run: |
-          mkdir -p dump/system dump/vendor temp_mount
+          mkdir -p dump/system dump/vendor
           
-          echo ">>> Buscando y uniendo SYSTEM..."
-          # Buscamos en todas las subcarpetas y ordenamos por versión (-V)
-          SYS_CHUNKS=$(find stock_raw -name "system.img_sparsechunk.*" | sort -V)
-          SYS_IMG=$(find stock_raw -type f -name "system.img")
-          
-          if [ -n "$SYS_CHUNKS" ]; then
-            simg2img $SYS_CHUNKS dump/system.img
-          elif [ -n "$SYS_IMG" ]; then
-            simg2img $SYS_IMG dump/system.img || cp $SYS_IMG dump/system.img
+          echo ">>> Uniendo SYSTEM..."
+          # Usamos mapfile para leer los archivos ordenados correctamente y evitar problemas de espacios
+          mapfile -t SYS_CHUNKS < <(find stock_raw -type f -iname "*system*sparsechunk*" | sort -V)
+          if [ ${#SYS_CHUNKS[@]} -gt 0 ]; then
+            echo "Encontrados ${#SYS_CHUNKS[@]} fragmentos de System. Uniendo..."
+            simg2img "${SYS_CHUNKS[@]}" dump/system.img
+          else
+            SYS_IMG=$(find stock_raw -type f -name "system.img" | head -n 1)
+            [ -n "$SYS_IMG" ] && cp "$SYS_IMG" dump/system.img
           fi
 
-          echo ">>> Buscando y uniendo VENDOR..."
-          VEN_CHUNKS=$(find stock_raw -name "vendor.img_sparsechunk.*" | sort -V)
-          VEN_IMG=$(find stock_raw -type f -name "vendor.img")
-          
-          if [ -n "$VEN_CHUNKS" ]; then
-            simg2img $VEN_CHUNKS dump/vendor.img
-          elif [ -n "$VEN_IMG" ]; then
-            simg2img $VEN_IMG dump/vendor.img || cp $VEN_IMG dump/vendor.img
+          echo ">>> Uniendo VENDOR..."
+          mapfile -t VEN_CHUNKS < <(find stock_raw -type f -iname "*vendor*sparsechunk*" | sort -V)
+          if [ ${#VEN_CHUNKS[@]} -gt 0 ]; then
+            echo "Encontrados ${#VEN_CHUNKS[@]} fragmentos de Vendor. Uniendo..."
+            simg2img "${VEN_CHUNKS[@]}" dump/vendor.img
+          else
+            VEN_IMG=$(find stock_raw -type f -name "vendor.img" | head -n 1)
+            [ -n "$VEN_IMG" ] && cp "$VEN_IMG" dump/vendor.img
           fi
 
-          echo ">>> Buscando BOOT..."
+          echo ">>> Copiando BOOT..."
           BOOT_IMG=$(find stock_raw -type f -name "boot.img" | head -n 1)
-          if [ -n "$BOOT_IMG" ]; then
-            cp "$BOOT_IMG" dump/boot.img
-          fi
+          [ -n "$BOOT_IMG" ] && cp "$BOOT_IMG" dump/boot.img
 
-      - name: Extracción Nativa (Evita el AssertionError)
+      - name: Extracción con 7-Zip (Bypass de Mount)
         run: |
-          # Montamos las imágenes ext4 reales y copiamos los archivos
-          # Esto le da a aospdtgen los archivos limpios (build.prop, etc)
+          # Inspeccionamos qué tipo de imagen resultó (solo para debug en los logs)
+          echo "Analizando system.img..."
+          file dump/system.img || true
           
           if [ -f dump/system.img ]; then
-            echo "Extrayendo contenidos de System..."
-            sudo mount -o ro,loop dump/system.img temp_mount
-            sudo cp -a temp_mount/* dump/system/
-            sudo umount temp_mount
-            rm dump/system.img # Borramos la imagen para ahorrar espacio
+            echo "Extrayendo System con 7z a la fuerza..."
+            # 7z abre el .img y extrae todo a la carpeta dump/system/
+            7z x dump/system.img -y -odump/system/ > /dev/null
+            
+            # Borramos la imagen original para que el generador solo vea la carpeta
+            rm dump/system.img
           else
-            echo "ERROR: System no se generó. Revisa tu archivo ZIP."
+            echo "ERROR: dump/system.img no existe."
             exit 1
           fi
 
           if [ -f dump/vendor.img ]; then
-            echo "Extrayendo contenidos de Vendor..."
-            sudo mount -o ro,loop dump/vendor.img temp_mount
-            sudo cp -a temp_mount/* dump/vendor/
-            sudo umount temp_mount
+            echo "Extrayendo Vendor con 7z a la fuerza..."
+            7z x dump/vendor.img -y -odump/vendor/ > /dev/null
             rm dump/vendor.img
           fi
-
-          # Aseguramos que el generador tenga permisos de lectura
-          sudo chown -R $USER:$USER dump/
 
       - name: Crear Device Tree
         run: |
           mkdir -p DeviceTree
+          # Ejecutamos el generador. Ahora leerá los archivos extraídos sin chistar.
           aospdtgen dump/ -o DeviceTree/
 
       - name: Subir el Device Tree
