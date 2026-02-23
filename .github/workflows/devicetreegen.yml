@@ -10,19 +10,20 @@ jobs:
       - name: Checkout de tu repositorio
         uses: actions/checkout@v4
 
-      - name: Checkout del Generador (aosp-dt-gen)
-        uses: actions/checkout@v4
-        with:
-          repository: sebaubuntu/aosp-dt-gen
-          path: aosp-dt-gen # Lo descarga en esta carpeta
-
-      - name: Configurar Entorno e Instalar Generador
+      - name: Instalar Herramientas y Generador
         run: |
           sudo apt-get update
-          sudo apt-get install -y python3-pip python3-setuptools p7zip-full android-sdk-libsparse-utils
+          sudo apt-get install -y python3-pip python3-setuptools p7zip-full android-sdk-libsparse-utils wget
+          
+          # Instalamos gdown para Google Drive
           pip3 install gdown
-          # Instalamos el generador desde la carpeta que acabamos de descargar
-          pip3 install ./aosp-dt-gen
+          
+          # Descargamos el generador como ZIP para evitar errores de Git/Auth
+          wget https://github.com/SebaUbuntu/aosp-dt-gen/archive/refs/heads/master.zip -O dt_gen.zip
+          unzip dt_gen.zip
+          
+          # Lo instalamos desde la carpeta descomprimida
+          pip3 install ./aosp-dt-gen-master
 
       - name: Descargar Firmware Stock (Google Drive)
         run: |
@@ -30,19 +31,20 @@ jobs:
           mkdir -p stock_raw
           unzip firmware.zip -d stock_raw/
 
-      - name: Preparar Imágenes (Unir Sparsechunks de Motorola)
+      - name: Unir Particiones Motorola (Sparsechunks)
         run: |
           mkdir -p dump
-          # Unimos los pedazos de system y vendor (común en Moto E5)
-          # El comando simg2img detecta si son sparse o imágenes crudas
+          # Unimos los pedazos de system y vendor
+          # simg2img es inteligente: si no es sparse, simplemente lo copiará
           simg2img stock_raw/system.img* dump/system.img || cp stock_raw/system.img dump/system.img || true
           simg2img stock_raw/vendor.img* dump/vendor.img || cp stock_raw/vendor.img dump/vendor.img || true
           cp stock_raw/boot.img dump/boot.img || true
 
       - name: Crear Device Tree
         run: |
+          # Creamos la carpeta en el root tal como pediste
           mkdir -p DeviceTree
-          # Ejecutamos el generador
+          # Ejecutamos el módulo
           python3 -m aosp_dt_gen dump/ -o DeviceTree/
 
       - name: Subir el Device Tree como Artefacto
