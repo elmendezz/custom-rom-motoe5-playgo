@@ -1,0 +1,45 @@
+name: Pettyl Device Tree Generator
+
+on:
+  workflow_dispatch: # Se activa manualmente desde la pestaña Actions
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout del Repo
+        uses: actions/checkout@v4
+
+      - name: Configurar Entorno
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-pip python3-setuptools p7zip-full simg2img
+          pip3 install gdown aosp-dt-gen
+
+      - name: Descargar Firmware Stock
+        run: |
+          # gdown maneja automáticamente el aviso de "descargar de todos modos"
+          gdown --id 1xoiMh-8BRMOj68VWunxtLPRg6rI4lpmM -O firmware.zip
+          mkdir -p stock_raw
+          unzip firmware.zip -d stock_raw/
+
+      - name: Preparar Imágenes (Reensamblar sparsechunks)
+        run: |
+          mkdir -p dump
+          # Los firmwares de Motorola vienen en partes (system.img.001, etc)
+          # simg2img los une en una imagen cruda que el generador puede leer
+          simg2img stock_raw/system.img.* dump/system.img || cp stock_raw/system.img dump/system.img || true
+          simg2img stock_raw/vendor.img.* dump/vendor.img || cp stock_raw/vendor.img dump/vendor.img || true
+          cp stock_raw/boot.img dump/boot.img || true
+
+      - name: Crear Device Tree
+        run: |
+          mkdir -p DeviceTree
+          # aosp-dt-gen analizará los archivos en 'dump' y creará el tree en 'DeviceTree'
+          python3 -m aosp_dt_gen dump/ -o DeviceTree/
+
+      - name: Subir el Device Tree como Artefacto
+        uses: actions/upload-artifact@v4
+        with:
+          name: Moto-E5-Play-Pettyl-Tree
+          path: DeviceTree/
