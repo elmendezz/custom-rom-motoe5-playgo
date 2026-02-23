@@ -13,32 +13,36 @@ jobs:
       - name: Configurar Entorno
         run: |
           sudo apt-get update
-          # Instalamos el reemplazo sugerido por la terminal
-          sudo apt-get install -y python3-pip python3-setuptools p7zip-full android-sdk-libsparse-utils
-          pip3 install gdown aosp-dt-gen
+          # Instalamos las herramientas de sistema necesarias
+          sudo apt-get install -y python3-pip python3-setuptools p7zip-full android-sdk-libsparse-utils git
+          
+          # Instalamos gdown y el generador directamente desde GitHub
+          pip3 install gdown
+          pip3 install git+https://github.com/sebaubuntu/aosp-dt-gen.git
 
       - name: Descargar Firmware Stock
         run: |
+          # Descarga el firmware usando el ID de Google Drive
           gdown --id 1xoiMh-8BRMOj68VWunxtLPRg6rI4lpmM -O firmware.zip
           mkdir -p stock_raw
           unzip firmware.zip -d stock_raw/
 
-      - name: Preparar Imágenes (Fix Sparsechunks)
+      - name: Preparar Imágenes (Unir Sparsechunks)
         run: |
           mkdir -p dump
-          # Para Motorola: Une los pedazos de system (sparsechunks) en uno solo
-          # Buscamos archivos que terminen en .0, .1, .img.001, etc.
+          # Unimos los pedazos de imagen de Motorola en archivos .img funcionales
           simg2img stock_raw/system.img* dump/system.img || cp stock_raw/system.img dump/system.img || true
           simg2img stock_raw/vendor.img* dump/vendor.img || cp stock_raw/vendor.img dump/vendor.img || true
           cp stock_raw/boot.img dump/boot.img || true
 
       - name: Crear Device Tree
         run: |
-          # Creamos el directorio tal como pediste
+          # Creamos el directorio solicitado en el root
           mkdir -p DeviceTree
+          # Ejecutamos el módulo instalado desde GitHub
           python3 -m aosp_dt_gen dump/ -o DeviceTree/
 
-      - name: Subir el Device Tree
+      - name: Subir el Device Tree como Artefacto
         uses: actions/upload-artifact@v4
         with:
           name: Moto-E5-Play-Pettyl-Tree
