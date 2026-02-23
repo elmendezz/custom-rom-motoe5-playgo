@@ -13,16 +13,18 @@ jobs:
       - name: Configurar Entorno
         run: |
           sudo apt-get update
-          # Instalamos las herramientas de sistema necesarias
           sudo apt-get install -y python3-pip python3-setuptools p7zip-full android-sdk-libsparse-utils git
           
-          # Instalamos gdown y el generador directamente desde GitHub
+          # Instalamos gdown normalmente
           pip3 install gdown
-          pip3 install git+https://github.com/sebaubuntu/aosp-dt-gen.git
+          
+          # Clonamos el generador manualmente para evitar el error de autenticación
+          git clone https://github.com/sebaubuntu/aosp-dt-gen.git
+          cd aosp-dt-gen
+          pip3 install .
 
       - name: Descargar Firmware Stock
         run: |
-          # Descarga el firmware usando el ID de Google Drive
           gdown --id 1xoiMh-8BRMOj68VWunxtLPRg6rI4lpmM -O firmware.zip
           mkdir -p stock_raw
           unzip firmware.zip -d stock_raw/
@@ -30,16 +32,17 @@ jobs:
       - name: Preparar Imágenes (Unir Sparsechunks)
         run: |
           mkdir -p dump
-          # Unimos los pedazos de imagen de Motorola en archivos .img funcionales
+          # Unimos los pedazos de imagen de Motorola
+          # Usamos -v para ver el progreso en el log
           simg2img stock_raw/system.img* dump/system.img || cp stock_raw/system.img dump/system.img || true
           simg2img stock_raw/vendor.img* dump/vendor.img || cp stock_raw/vendor.img dump/vendor.img || true
           cp stock_raw/boot.img dump/boot.img || true
 
       - name: Crear Device Tree
         run: |
-          # Creamos el directorio solicitado en el root
+          # Creamos el directorio solicitado
           mkdir -p DeviceTree
-          # Ejecutamos el módulo instalado desde GitHub
+          # Ejecutamos el generador apuntando al dump
           python3 -m aosp_dt_gen dump/ -o DeviceTree/
 
       - name: Subir el Device Tree como Artefacto
